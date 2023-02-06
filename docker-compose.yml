@@ -1,0 +1,108 @@
+version: "3.3"
+services:
+  microservice_db:
+    image: mysql:5.7.9
+    container_name: microservice_db
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      MYSQL_DATABASE: car_app
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: root
+    networks:
+      - wanclouds_default
+    expose:
+      - 3306
+    volumes:
+      - microservices_app:/var/lib/mysql
+
+  microservice_app:
+    container_name: microservice_app
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: gunicorn --bind 0.0.0.0:9000 app:app --timeout 400
+    environment:
+      - SQLALCHEMY_DATABASE_URI=mysql+mysqldb://root:root@microservice_db/car_app
+    ports:
+      - "9000:9000"
+    volumes:
+      - .:/var/lib/app
+    networks:
+      - wanclouds_default
+    depends_on:
+      - microservice_db
+    restart: always
+
+  microservice_redis:
+    container_name: microservice_redis
+    image: redis:5.0.5
+    networks:
+      - wanclouds_default
+    restart: always
+    hostname: microservice_redis
+
+
+  microservice_celery_worker:
+    container_name: microservice_celery_worker
+    build:
+      context: .
+    hostname: worker
+    command: celery -A app.client.client.celery worker --loglevel=info
+    restart: always
+    networks:
+      - wanclouds_default
+    volumes:
+      - .:/microservices_app
+    links:
+      - microservice_redis
+    depends_on:
+      - microservice_app
+      - microservice_redis
+
+  microservice_celery-beat:
+      container_name: microservice_celery-beat
+      build:
+        context: .
+      command: celery -A app.client.client.celery beat
+      restart: always
+      networks:
+        - wanclouds_default
+      volumes:
+        - .:/microservices_app/beat
+      depends_on:
+        - microservice_celery_worker
+        - microservice_app
+        - microservice_redis
+
+  grpc_client:
+    container_name: grpc_client
+    build:
+      context: .
+#    entrypoint: ./bin/client_rpc.sh
+    restart: always
+    networks:
+      - wanclouds_default
+    volumes:
+      - .:/microservices_app/grpc_client
+    links:
+      - microservice_db
+    depends_on:
+      - microservice_app
+
+volumes:
+  microservices_app:
+
+#networks:
+#  mynetwork:
+#    driver: bridge
+#    ipam:
+#      config:
+#        - subnet: 10.0.2.0/24
+
+networks:
+    wanclouds_default:
+      name: wanclouds_default
+      external: True
+
